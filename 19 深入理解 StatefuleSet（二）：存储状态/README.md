@@ -20,7 +20,7 @@
 
 在 POD 中使用 RBD 块设备。
 
-## 编写 rbd.yaml 文件
+### 编写 rbd.yaml 文件
 
 首先，编写一个声明了 Ceph RBD 类型的 Volume 的 Pod：[rbd.yaml](./rbd.yaml)
 
