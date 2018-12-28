@@ -5,12 +5,13 @@
 
 - [实践环境](#实践环境)
 
-- [实践一：在 POD 中使用 Ceph RBD](#实践一)
+- [实践一：在 POD 对象中使用 Ceph RBD](#实践一)
 
-- [实践二：使用 Kubernetes Secret 对象认证 Ceph 存储集群](#实践二)
+- [实践二：在 POD 对象中使用 Kubernetes Secret 对象认证 Ceph 存储集群](#实践二)
 
-- [实践三：通过 Kubernetes PV & PVC 方式使用 Ceph RBD](#实践三)
+- [实践三：在 POD 对象中通过 Kubernetes PV & PVC 方式使用 Ceph RBD](#实践三)
 
+- [实践四：在 StatefulSet 对象中通过模板自动创建 PVC 并与 PV 绑定 ](#实践四)
 
 ## 实践环境
 
@@ -27,7 +28,7 @@
 
 ## 实践一
 
-在 POD 中使用 RBD。
+在 POD 对象中使用 RBD。
 
 
 ### 编写 rbd.yaml 文件
@@ -221,7 +222,7 @@ spec:
    
 ## 实践二
 
-使用 secret 对象认证 Ceph 存储集群。
+在 POD 对象中使用 Kubernetes Secret 对象认证 Ceph 存储集群。
 
 这种方式和实践一直接使用 keyring 文件认证的区别就是使用 Kubernetes Secret 对象，该 Secret 对象用于 Kubernetes Volume 插件通过 Cephx 认证访问 Ceph 存储集群。
 
@@ -370,7 +371,7 @@ spec:
 
 ## 实践三
 
-通过 Kubernetes PV & PVC 方式使用 Ceph RBD。
+在 POD 对象中通过 Kubernetes PV & PVC 方式使用 Ceph RBD。
 
 ### 创建 PV
 
@@ -554,3 +555,264 @@ spec:
    /dev/rbd0               xfs       10G   33M   10G   1% /usr/share/nginx/html
    ...
    ```
+
+
+## 实践四
+
+在 StatefulSet 对象中通过模板自动创建 PVC 并与 PV 绑定。
+
+为 StatefulSet 对象额外添加了一个 volumeClaimTemplates 字段。凡是被这个 StatefulSet 对象管理的 Pod，都会声明一个对应的 PVC。而这个 PVC 的定义，就来自于 volumeClaimTeplates 这个模板字段。并且，这个 PVC 的名字会被分配一个与这个 Pod 完全一致的编号。 
+
+因为我之后编写的 [statefulset.yaml](./statefulset.yaml) 文件中的副本数为 2 ，所以会自动创建 2 个 PVC。而一个 PVC 对应一个 PV ，所以需要创建两个 PV。又因为一个 PV 对应一个 RBD，所以需要创建两个 RBD。
+
+这个实践，我创建 2 个新的磁盘镜像以及 2 个新的 PV 提供给 StatefulSet 使用。
+
+### 创建 RBD 块设备
+
+以下为创建 RBD 的操作步骤（详细说明参考实践一）：
+
+```bash
+$ rbd create www-1 --size 10240M --pool kube
+$ rbd create www-2 --size 10240M --pool kube
+
+$ rbd list --pool kube
+foo
+www-1
+www-2
+
+$ rbd feature disable www-1 exclusive-lock, object-map, fast-diff, deep-flatten --pool kube
+$ rbd feature disable www-2 exclusive-lock, object-map, fast-diff, deep-flatten --pool kube
+
+$ rbd --image www-1 info --pool kube
+rbd image 'www-1':
+   size 10240 MB in 2560 objects
+   order 22 (4096 kB objects)
+   block_name_prefix: rbd_data.628f6b8b4567
+   format: 2
+   features: layering
+   flags:
+$ rbd --image www-2 info --pool kube
+rbd image 'www-2':
+   size 10240 MB in 2560 objects
+   order 22 (4096 kB objects)
+   block_name_prefix: rbd_data.62c66b8b4567
+   format: 2
+   features: layering
+   flags:
+```
+
+### 创建 PV
+
+1. 编写 pv-www-1.yaml 与 pv-www-2.yaml 文件
+
+   [pv-www-1.yaml](./pv-www-1.yaml) 与 [pv-www-2.yaml](./pv-www-2.yaml) 文件内容如下：
+
+   ```yaml
+   # pv-www-1.yaml
+   apiVersion: v1
+   kind: PersistentVolume
+   metadata:
+     name: pv-www-1
+     labels:
+       type: local
+   spec:
+     capacity:
+       storage: 10Gi
+     accessModes:
+       - ReadWriteOnce
+     rbd:
+       monitors:
+       - '10.10.113.15:6789'
+       - '10.10.113.16:6789'
+       - '10.10.113.17:6789'
+       pool: kube
+       image: www-1
+       fsType: xfs
+       readOnly: false
+       user: admin
+       secretRef:
+         name: ceph-secret
+   #    imageformat: "2"
+   #    imagefeatures: "layering"
+
+   # pv-www-2.yaml
+   apiVersion: v1
+   kind: PersistentVolume
+   metadata:
+     name: pv-www-2
+     labels:
+       type: local
+   spec:
+     capacity:
+       storage: 10Gi
+     accessModes:
+       - ReadWriteOnce
+     rbd:
+       monitors:
+       - '10.10.113.15:6789'
+       - '10.10.113.16:6789'
+       - '10.10.113.17:6789'
+       pool: kube
+       image: www-2
+       fsType: xfs
+       readOnly: false
+       user: admin
+       secretRef:
+         name: ceph-secret
+   #    imageformat: "2"
+   #    imagefeatures: "layering"
+   ```
+
+2. 创建 PV
+
+   ```bash
+   $ kubectl create -f pv-www-1.yaml
+   persistentvolume/pv-www-1 created
+   $ kubectl create -f pv-www-2.yaml
+   persistentvolume/pv-www-2 created
+
+   $ kubectl get pv
+   NAME        CAPACITY   ACCESS MODES   RECLAIM POLICY   STATUS      CLAIM              STORAGECLASS   REASON    AGE
+   pv-volume   10Gi       RWO            Retain           Bound       default/pv-claim                            3h
+   pv-www-1    10Gi       RWO            Retain           Available                                               1m
+   pv-www-2    10Gi       RWO            Retain           Available                                               33s
+   ```
+
+### 创建 StatefulSet
+
+1. 编写 statefulset.yaml 文件
+
+   [statefulset.yaml](./statefulset.yaml) 文件内容如下：
+
+   ```yaml
+   apiVersion: apps/v1
+   kind: StatefulSet
+   metadata:
+     name: web
+   spec:
+     serviceName: "nginx"
+     replicas: 2
+     selector:
+       matchLabels:
+         app: nginx
+     template:
+       metadata:
+         labels:
+           app: nginx
+       spec:
+         containers:
+           - name: nginx
+             image: nginx:1.9.1
+             ports:
+               - containerPort: 80
+                 name: web
+             volumeMounts:
+             - name: www
+               mountPath: /usr/share/nginx/html
+     volumeClaimTemplates:
+     - metadata:
+         name: www
+       spec:
+         accessModes:
+         - ReadWriteOnce
+         resources:
+           requests:
+             storage: 1Gi
+   ```
+
+2. 创建 StatefulSet
+
+   ```bash
+   $ kubectl create -f statefulset.yaml
+   statefulset.apps/web created
+
+   $ kubectl describe statefulset web
+   Events:
+   Type    Reason            Age   From                    Message
+   ----    ------            ----  ----                    -------
+   Normal  SuccessfulCreate  52s   statefulset-controller  create Claim www-web-0 Pod web-0 in StatefulSet web success
+   Normal  SuccessfulCreate  52s   statefulset-controller  create Pod web-0 in StatefulSet web successful
+   Normal  SuccessfulCreate  47s   statefulset-controller  create Claim www-web-1 Pod web-1 in StatefulSet web success
+   Normal  SuccessfulCreate  47s   statefulset-controller  create Pod web-1 in StatefulSet web successful
+
+   $ kubectl get statefulset
+   NAME      DESIRED   CURRENT   AGE
+   web       2         2         1m
+
+   $ kubectl get pods
+   NAME      READY     STATUS    RESTARTS   AGE
+   pv-pod    1/1       Running   0          41m
+   web-0     1/1       Running   0          40s
+   web-1     1/1       Running   0          30s
+
+   $ kubectl get pvc -l app=nginx
+   NAME        STATUS    VOLUME      CAPACITY   ACCESS MODES   STORAGECLASS   AGE
+   www-web-0   Bound     pv-www-2    10Gi       RWO                           1m
+   www-web-1   Bound     pv-www-1    10Gi       RWO                           57s
+
+   $ kubectl get pv
+   NAME        CAPACITY   ACCESS MODES   RECLAIM POLICY   STATUS    CLAIM               STORAGECLASS   REASON    AGE
+   pv-volume   10Gi       RWO            Retain           Bound     default/pv-claim                             3h
+   pv-www-1    10Gi       RWO            Retain           Bound     default/www-web-1                            2m
+   pv-www-2    10Gi       RWO            Retain           Bound     default/www-web-0                            2m
+   ```
+
+### 验证 PV 的使用
+
+在 Pod 的 Volume 目录里写入一个文件：
+
+```bash
+$ for i in 0 1; do kubectl exec web-$i -- sh -c 'echo hello $(hostname) > /usr/share/nginx/html/index.html'; done
+```
+
+获取这 2 个容器的 Ip 地址：
+
+```bash
+$ for i in 0 1; do kubectl exec web-$i -- ip a | grep inet.*eth0; done
+    inet 10.244.4.16/32 scope global eth0
+    inet 10.244.5.17/32 scope global eth0
+```
+
+然后在容器外访问 Nginx：
+
+```bash
+$ curl 10.244.4.16 10.244.5.17
+hello web-0
+hello web-1
+```
+
+最后验证删掉这 2 个 Pod，重新创建出来的 2 个 Pod 的数据是否还存在：
+
+```bash
+$ kubectl delete pod -l app=nginx
+pod "web-0" deleted
+pod "web-1" deleted
+
+# 等待 Pod 重新创建完成
+$ kubectl get pod -l app=nginx
+NAME      READY     STATUS    RESTARTS   AGE
+web-0     1/1       Running   0          48s
+web-1     1/1       Running   0          31s
+
+$ for i in 0 1; do kubectl exec web-$i -- ip a | grep inet.*eth0; done
+    inet 10.244.5.18/32 scope global eth0
+    inet 10.244.4.17/32 scope global eth0
+
+$ curl 10.244.5.18 10.244.4.17
+hello web-0
+hello web-1
+```
+
+可以发现，删除掉 Pod 之后，这个 Pod 对应的 PVC 与 PV 并不会被删除。而这个 Volume 里已经写入的数据，也依然会保存在 Ceph 存储集群中。
+
+
+### 总结
+
+1. **StatefulSet 的控制器直接管理的是 Pod。**<br/>
+   StatefulSet 里不同 Pod 实例，不再像 RepilcaSet 中那样都是完全一样的，而是有了细微的区别。比如每个 Pod 的 hostname、名字等都是不同的，携带了编号的。而 StatefulSet 区分这些实例的方式，就是通过在 Pod 的名字里加上事先约定好的编号。
+
+2. **Kubernetes 通过 Headless Service，为这些有编号的 Pod，在 DNS 服务器中生成带有同样编号的 DNS 记录。**<br/>
+   只要 StatefulSet 能够保证这些 Pod 名字里的编号不变，那么 Service 里类似与 web-0.nginx.default.svc.cluster.local 这样的 DNS 记录也就不会变，而这条记录解析出来的 Pod 的 IP 地址，则会随着后端 Pod 的删除和再创建而自动更新。这当然是 Service 机制本身的能力，不需要 StatefulSet 操心。
+
+3. **StatefulSet 还会为每一个 Pod 分配并创建同样编号的 PVC。**<br/>
+   这样，Kubernetes 就可以通过 Persistent Volume 机制为这个 PVC 绑定上对应的 PV，从而保证了每一个 Pod 都拥有一个独立的 Volume。在这种情况下，即使 Pod 被删除，它所对应的 PVC 和 PV 依然会保留下来。所以当这个 Pod 被重新创建出来之后，Kubernetes 会为它找到同样编号的 PVC，挂载这个 PVC 对应的 Volume，从而获取以前保存在 Volume 里的数据。 
