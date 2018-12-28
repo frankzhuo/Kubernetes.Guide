@@ -5,7 +5,11 @@
 
 - [实践环境](#实践环境)
 
-- [实践一：在 POD 中使用 RBD 块设备](#实践一)
+- [实践一：在 POD 中使用 Ceph RBD](#实践一)
+
+- [实践二：使用 Kubernetes Secret 对象认证 Ceph 存储集群](#实践二)
+
+- [实践三：通过 Kubernetes PV & PVC 方式使用 Ceph RBD](#实践三)
 
 
 ## 实践环境
@@ -23,7 +27,7 @@
 
 ## 实践一
 
-在 POD 中使用 RBD 块设备。
+在 POD 中使用 RBD。
 
 
 ### 编写 rbd.yaml 文件
@@ -154,37 +158,399 @@ spec:
 
    ```bash
    $ kubectl create -f rbd.yaml
-   ```
 
-3. 验证 Pod 是否挂载 Ceph 集群
-
-   ```bash
    $ kubectl describe pod rbd
    Events:
-   Type     Reason                  Age   From                     Message
-   ----     ------                  ----  ----                     -------
-   Normal   Scheduled               3m    default-scheduler        Successfully assigned default/rbd to k8s-node-2
-   Normal   SuccessfulAttachVolume  3m    attachdetach-controller  AttachVolume.Attach succeeded for volume "rbdpd"
-   Warning  FailedMount             1m    kubelet, k8s-node-2      Unable to mount volumes for pod "rbd_default(4bd5cf95-08e9-11e9-befb-0050569fa5b1)": timeout expired waiting for volumes to attach or mount for pod "default"/"rbd". list of unmounted volumes=[rbdpd]. list of unattached volumes=[rbdpd default-token-qsxnk]
-   Normal   Pulling                 1m    kubelet, k8s-node-2      pulling image "kubernetes/pause"
-   Normal   Pulled                  1m    kubelet, k8s-node-2      Successfully pulled image "kubernetes/pause"
-   Normal   Created                 1m    kubelet, k8s-node-2      Created container
-   Normal   Started                 1m    kubelet, k8s-node-2      Started container
+   Type    Reason                  Age   From                     Message
+   ----    ------                  ----  ----                     -------
+   Normal  Scheduled               54s   default-scheduler        Successfully assigned default/rbd to k8s-node-3
+   Normal  SuccessfulAttachVolume  54s   attachdetach-controller  AttachVolume.Attach succeeded for volume "rbdpd"
+   Normal  Pulling                 45s   kubelet, k8s-node-3      pulling image "kubernetes/pause"
+   Normal  Pulled                  36s   kubelet, k8s-node-3      Successfully pulled image "kubernetes/pause"
+   Normal  Created                 36s   kubelet, k8s-node-3      Created container
+   Normal  Started                 36s   kubelet, k8s-node-3      Started container
 
-   # 在 node 节点上验证容器的挂载信息
+   $ kubectl get pods
+   NAME      READY     STATUS    RESTARTS   AGE
+   rbd       1/1       Running   0          19s
+   ```
+
+3. 验证 Pod 是否挂载 Ceph 存储集群
+
+   ```bash
+   # 在 k8s-node-3 节点上验证容器的挂载信息
    $ docker container ls
    16dcbd0cf614    kubernetes/pause    "/pause"    7 minutes ago    Up 7 minutes    k8s_rbd-rw_rbd_default_4bd5cf95-08e9-11e9-befb-0050569fa5b1_0
 
    $ docker container inspect --format='{{json .Mounts}}' 16dcbd0cf614 | jq
    [
-   {
-     "Type": "bind",
-     "Source": "/var/lib/kubelet/pods/4bd5cf95-08e9-11e9-befb-0050569fa5b1/volumes/kubernetes.io~rbd/rbdpd",
-     "Destination": "/mnt/rbd",
-     "Mode": "",
-     "RW": true,
-     "Propagation": "rprivate"
-   },
+     {
+       "Type": "bind",
+       "Source": "/var/lib/kubelet/pods/b454c3ab-0a41-11e9-aff7-0050569f6e43/containers/rbd-rw/32817b7a",
+       "Destination": "/dev/termination-log",
+       "Mode": "",
+       "RW": true,
+       "Propagation": "rprivate"
+     },
+     {
+       "Type": "bind",
+       "Source": "/var/lib/kubelet/pods/b454c3ab-0a41-11e9-aff7-0050569f6e43/volumes/kubernetes.io~rbd/rbdpd",
+       "Destination": "/mnt/rbd",
+       "Mode": "",
+       "RW": true,
+       "Propagation": "rprivate"
+     },
+     {
+       "Type": "bind",
+       "Source": "/var/lib/kubelet/pods/b454c3ab-0a41-11e9-aff7-0050569f6e43/volumes/kubernetes.io~secret/default-token-qsxnk",
+       "Destination": "/var/run/secrets/kubernetes.io/serviceaccount",
+       "Mode": "ro",
+       "RW": false,
+       "Propagation": "rprivate"
+     },
+     {
+       "Type": "bind",
+       "Source": "/var/lib/kubelet/pods/b454c3ab-0a41-11e9-aff7-0050569f6e43/etc-hosts",
+       "Destination": "/etc/hosts",
+       "Mode": "",
+       "RW": true,
+       "Propagation": "rprivate"
+     }
    ]
    ```
    
+## 实践二
+
+使用 secret 对象认证 Ceph 存储集群。
+
+这种方式和实践一直接使用 keyring 文件认证的区别就是使用 Kubernetes Secret 对象，该 Secret 对象用于 Kubernetes Volume 插件通过 Cephx 认证访问 Ceph 存储集群。
+
+### 创建 Secret 对象
+
+1. 获取 Ceph keyring 并生成 Secret Key
+
+   ```bash
+   # 方式一
+   $ grep key /etc/ceph/ceph.client.admin.keyring | awk '{ printf $NF}' | base64
+   QVFCWXFpQmN6RmZUSUJBQW56Ym5jZVE5alhLMGJBUUxWUTVaWEE9PQ==
+
+   # 方式二
+   $ ceph auth get-key client.admin | base64
+   QVFCWXFpQmN6RmZUSUJBQW56Ym5jZVE5alhLMGJBUUxWUTVaWEE9PQ==
+   ```
+
+2. 编写 ceph-secret.yaml 文件
+
+   [ceph-secret.yaml](./secret/ceph-secret.yaml) 文件内容如下：
+
+   ```yaml
+   apiVersion: v1
+   kind: Secret
+   metadata:
+     name: ceph-secret
+   type: "kubernetes.io/rbd"  
+   data:
+     key: QVFCWXFpQmN6RmZUSUJBQW56Ym5jZVE5alhLMGJBUUxWUTVaWEE9PQ==
+   ```
+
+   key 的值即为第一步生成的 Secret Key。
+
+3. 创建 Secret 对象
+
+   ```bash
+   $ kubectl create -f secret/ceph-secret.yaml
+   
+   # 查看 Secret 对象是否已经创建
+   $ kubectl get secret
+   NAME                  TYPE                                  DATA      AGE
+   ceph-secret           kubernetes.io/rbd                     1         1m
+   ```
+
+### 创建 pod
+
+1. 编写 rbd-with-secret.yaml 文件
+
+   [rbd-with-secret.yaml](./rbd-with-secret.yaml) 文件内容如下：
+
+   ```yaml
+   apiVersion: v1
+   kind: Pod
+   metadata:
+     name: rbd
+   spec:
+     containers:
+       - image: kubernetes/pause
+         name: rbd-rw
+         volumeMounts:
+         - name: rbdpd
+           mountPath: /mnt/rbd
+     volumes:
+       - name: rbdpd
+         rbd:
+           monitors:
+           - '10.10.113.15:6789'
+           - '10.10.113.16:6789'
+           - '10.10.113.17:6789'
+           pool: kube
+           image: foo
+           fsType: xfs
+           readOnly: false
+           user: admin
+           secretRef:
+             name: ceph-secret
+   #        imageformat: "2"
+   #        imagefeatures: "layering"
+   ```
+
+   发现，rbd-with-secret.yaml 与 rdb.yaml 的区别就在于前者使用的是 secretRef，后者使用的是 keyring。
+
+2. 创建 Pod
+
+   ```bash
+   $ kubectl create -f rbd-with-secret.yaml
+
+   $ kubectl describe pod rbd2
+   Events:
+   Type    Reason                  Age   From                     Message
+   ----    ------                  ----  ----                     -------
+   Normal  Scheduled               16s   default-scheduler        Successfully assigned default/rbd2 to k8s-node-3
+   Normal  SuccessfulAttachVolume  16s   attachdetach-controller  AttachVolume.Attach succeeded for volume "rbdpd"
+   Normal  Pulling                 12s   kubelet, k8s-node-3      pulling image "kubernetes/pause"
+   Normal  Pulled                  9s    kubelet, k8s-node-3      Successfully pulled image "kubernetes/pause"
+   Normal  Created                 9s    kubelet, k8s-node-3      Created container
+   Normal  Started                 9s    kubelet, k8s-node-3      Started container
+
+   $ kubectl get pods
+   NAME      READY     STATUS    RESTARTS   AGE
+   rbd2      1/1       Running   0          1h
+   ```
+
+3. 验证 Pod 是否挂载 Ceph 存储集群
+    
+   ```bash
+   $ docker container ls
+   242bfdce681f    kubernetes/pause    "/pause"    2 hours ago     Up 2 hours    k8s_rbd-rw_rbd2_default_16a28e20-0a43-11e9-aff7-0050569f6e43_0
+
+   $ docker container inspect --format='{{json .Mounts}}' 242bfdce681f | jq
+   [
+     {
+       "Type": "bind",
+       "Source": "/var/lib/kubelet/pods/16a28e20-0a43-11e9-aff7-0050569f6e43/containers/rbd-rw/384ae4be",
+       "Destination": "/dev/termination-log",
+       "Mode": "",
+       "RW": true,
+       "Propagation": "rprivate"
+     },
+     {
+       "Type": "bind",
+       "Source": "/var/lib/kubelet/pods/16a28e20-0a43-11e9-aff7-0050569f6e43/volumes/kubernetes.io~rbd/rbdpd",
+       "Destination": "/mnt/rbd",
+       "Mode": "",
+       "RW": true,
+       "Propagation": "rprivate"
+     },
+     {
+       "Type": "bind",
+       "Source": "/var/lib/kubelet/pods/16a28e20-0a43-11e9-aff7-0050569f6e43/volumes/kubernetes.io~secret/default-token-qsxnk",
+       "Destination": "/var/run/secrets/kubernetes.io/serviceaccount",
+       "Mode": "ro",
+       "RW": false,
+       "Propagation": "rprivate"
+     },
+     {
+       "Type": "bind",
+       "Source": "/var/lib/kubelet/pods/16a28e20-0a43-11e9-aff7-0050569f6e43/etc-hosts",
+       "Destination": "/etc/hosts",
+       "Mode": "",
+       "RW": true,
+       "Propagation": "rprivate"
+     }
+   ]
+   ```
+
+## 实践三
+
+通过 Kubernetes PV & PVC 方式使用 Ceph RBD。
+
+### 创建 PV
+
+首先，先创建一个 PV，认证方式使用 Secret 对象。之前实践中已经创建过了，故不再创建。
+
+1. 编写 pv.yaml 文件
+   
+   [pv.yaml](./pv.yaml) 文件内容如下：
+
+   ```yaml
+   apiVersion: v1
+   kind: PersistentVolume
+   metadata:
+     name: pv-volume
+     labels:
+       type: local
+   spec:
+     capacity:
+       storage: 10Gi
+     accessModes:
+       - ReadWriteOnce
+     rbd:
+       monitors:
+       - '10.10.113.15:6789'
+       - '10.10.113.16:6789'
+       - '10.10.113.17:6789'
+       pool: kube
+       image: foo
+       fsType: xfs
+       readOnly: false
+       user: admin
+       secretRef:
+         name: ceph-secret
+   ```
+
+2. 创建 PV
+
+   ```bash
+   $ kubectl create -f pv.yaml 
+   persistentvolume/pv-volume created
+
+   $ kubectl get pv
+   NAME        CAPACITY   ACCESS MODES   RECLAIM POLICY   STATUS      CLAIM     STORAGECLASS   REASON    AGE
+   pv-volume   10Gi       RWO            Retain           Available                                      24s
+   ```
+
+### 创建 PVC
+
+然后，创建一个 PVC，声明资源请求。
+
+1. 编写 pvc.yaml 文件
+
+   [pvc.yaml](./pvc.yaml) 文件内容如下：
+
+   ```yaml
+   apiVersion: v1
+   kind: PersistentVolumeClaim
+   metadata:
+     name: pv-claim
+   spec:
+     accessModes:
+     - ReadWriteOnce
+     resources:
+       requests:
+         storage: 1Gi
+   ```
+
+2. 创建 PVC
+
+   ```bash
+   $ kubectl create -f pvc.yaml
+
+   $ kubectl get pvc
+   NAME       STATUS    VOLUME      CAPACITY   ACCESS MODES   STORAGECLASS   AGE
+   pv-claim   Bound     pv-volume   10Gi       RWO                           36s
+   ```
+
+### 创建 Pod
+
+最后创建一个应用 Pod，在应用 Pod 中，声明使用这个 PVC。
+
+1. 编写 pvc-pod.yaml 文件
+
+   [pvc-pod.yaml](./pvc-pod.yaml) 文件内容如下:
+
+   ```yaml
+   apiVersion: v1
+   kind: Pod
+   metadata:
+     name: pv-pod
+   spec:
+     containers:
+       - name: pv-container
+         image: nginx
+         ports:
+           - containerPort: 80
+             name: "http-server"
+         volumeMounts:
+           - mountPath: "/usr/share/nginx/html"
+             name: pv-storage
+     volumes:
+       - name: pv-storage
+         persistentVolumeClaim:
+           claimName: pv-claim
+   ```
+
+2. 创建 Pod
+
+   ```bash
+   $ kubectl create -f pvc-pod.yaml
+   pod/pv-pod created
+
+   $ kubectl describe pod pv-pod
+   Events:
+   Type    Reason                  Age   From                     Message
+   ----    ------                  ----  ----                     -------
+   Normal  Scheduled               1m    default-scheduler        Successfully assigned default/pv-pod to k8s-node-2
+   Normal  SuccessfulAttachVolume  1m    attachdetach-controller  AttachVolume.Attach succeeded for volume "pv-volume"
+   Normal  Pulling                 1m    kubelet, k8s-node-2      pulling image "nginx"
+   Normal  Pulled                  26s   kubelet, k8s-node-2      Successfully pulled image "nginx"
+   Normal  Created                 25s   kubelet, k8s-node-2      Created container
+   Normal  Started                 25s   kubelet, k8s-node-2      Started container
+
+   $ kubectl get pods
+   NAME      READY     STATUS    RESTARTS   AGE
+   pv-pod    1/1       Running   0          3m
+   ```
+
+3. 验证 Pod 是否挂载 Ceph 存储集群
+
+   ```bash
+   # 在 k8s-node-2 节点上验证容器的挂载信息
+   $ docker container ls
+   8086181373e2    nginx    "nginx -g 'daemon of…"    5 minutes ago    Up 5 minutes    k8s_pv-container_pv-pod_default_36755b95-0a62-11e9-aff7-0050569f6e43_0
+
+   $ docker container inspect --format='{{json .Mounts}}' 8086181373e2 | jq
+   [
+     {
+       "Type": "bind",
+       "Source": "/var/lib/kubelet/pods/36755b95-0a62-11e9-aff7-0050569f6e43/volumes/kubernetes.io~rbd/pv-volume",
+       "Destination": "/usr/share/nginx/html",
+       "Mode": "",
+       "RW": true,
+       "Propagation": "rprivate"
+     },
+     {
+       "Type": "bind",
+       "Source": "/var/lib/kubelet/pods/36755b95-0a62-11e9-aff7-0050569f6e43/volumes/kubernetes.io~secret/default-token-qsxnk",
+       "Destination": "/var/run/secrets/kubernetes.io/serviceaccount",
+       "Mode": "ro",
+       "RW": false,
+       "Propagation": "rprivate"
+     },
+     {
+       "Type": "bind",
+       "Source": "/var/lib/kubelet/pods/36755b95-0a62-11e9-aff7-0050569f6e43/etc-hosts",
+       "Destination": "/etc/hosts",
+       "Mode": "",
+       "RW": true,
+       "Propagation": "rprivate"
+     },
+     {
+       "Type": "bind",
+       "Source": "/var/lib/kubelet/pods/36755b95-0a62-11e9-aff7-0050569f6e43/containers/pv-container/59b0ca2a",
+       "Destination": "/dev/termination-log",
+       "Mode": "",
+       "RW": true,
+       "Propagation": "rprivate"
+     }
+   ]
+   ```
+
+4. 启动终端验证是否已经挂载 RBD
+
+   ```bash
+   $ kubectl exec -ti pv-pod /bin/bash
+
+   $ df -Th
+   Filesystem              Type     Size  Used Avail Use% Mounted on
+   ...
+   /dev/rbd0               xfs       10G   33M   10G   1% /usr/share/nginx/html
+   ...
+   ```
