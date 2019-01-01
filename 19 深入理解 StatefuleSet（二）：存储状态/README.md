@@ -13,6 +13,9 @@
 
 - [实践四：在 StatefulSet 对象中通过模板自动创建 PVC 并与 PV 绑定 ](#实践四)
 
+- [总结](#总结)
+
+---
 
 ## 实践环境
 
@@ -26,6 +29,7 @@
 
 本次实践需要提前搭建好 Kubernetes 集群与 Ceph 存储集群。
 
+---
 
 ## 实践一
 
@@ -220,6 +224,8 @@ spec:
      }
    ]
    ```
+
+---
    
 ## 实践二
 
@@ -369,6 +375,8 @@ spec:
      }
    ]
    ```
+
+---
 
 ## 实践三
 
@@ -557,6 +565,7 @@ spec:
    ...
    ```
 
+---
 
 ## 实践四
 
@@ -806,8 +815,9 @@ hello web-1
 
 可以发现，删除掉 Pod 之后，这个 Pod 对应的 PVC 与 PV 并不会被删除。而这个 Volume 里已经写入的数据，也依然会保存在 Ceph 存储集群中。
 
+---
 
-### 总结
+## 总结
 
 1. **StatefulSet 的控制器直接管理的是 Pod。**<br/>
    StatefulSet 里不同 Pod 实例，不再像 RepilcaSet 中那样都是完全一样的，而是有了细微的区别。比如每个 Pod 的 hostname、名字等都是不同的，携带了编号的。而 StatefulSet 区分这些实例的方式，就是通过在 Pod 的名字里加上事先约定好的编号。
@@ -817,3 +827,5 @@ hello web-1
 
 3. **StatefulSet 还会为每一个 Pod 分配并创建同样编号的 PVC。**<br/>
    这样，Kubernetes 就可以通过 Persistent Volume 机制为这个 PVC 绑定上对应的 PV，从而保证了每一个 Pod 都拥有一个独立的 Volume。在这种情况下，即使 Pod 被删除，它所对应的 PVC 和 PV 依然会保留下来。所以当这个 Pod 被重新创建出来之后，Kubernetes 会为它找到同样编号的 PVC，挂载这个 PVC 对应的 Volume，从而获取以前保存在 Volume 里的数据。 
+
+---
