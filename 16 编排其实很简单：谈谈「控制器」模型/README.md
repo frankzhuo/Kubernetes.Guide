@@ -162,7 +162,7 @@ for {
    ```bash
    # 方式一：使用 etcdctl 命令查询 Etcd 中保存的数据
    $ ETCDCTL_API=3 etcdctl get /registry/deployments/default/nginx-deployment --prefix -w json | jq . | awk -F\" '/value/{print $(NF-1)}' | base64 -d
-   # 解析出来有乱码，暂时不知道原因，但是可以发现有一下信息：
+   # 解析出来有乱码，暂时不知道原因，但是可以发现有以下信息：
    ..."spec":{"replicas":2,"selector":{"matchLabels":{"app":"nginx"}...
 
    # 方式二：使用 curl 调取 Kubernetes 接口查询 Etcd 中保存的数据
@@ -187,7 +187,7 @@ for {
 
 3. Deployment 控制器将两个状态做比较，然后根据比较结果，确定是创建 Pod，还是删除已有的 Pod。
 
-实际上，Kubernetes 对象的主要编排逻辑，实际上市在第三部的「对比」阶段完成的。这个操作，通常叫作调谐（Reconcile）。这个调谐的过程，则被称作「Reconcile Loop」（调谐循环）或者「Sync Loop」（同步循环）。
+实际上，Kubernetes 对象的主要编排逻辑，实际上是在第三步的「对比」阶段完成的。这个操作，通常叫作调谐（Reconcile）。这个调谐的过程，则被称作「Reconcile Loop」（调谐循环）或者「Sync Loop」（同步循环）。调谐循环与同步循环其实指的是同一个东西：控制循环。
 
 ---
 
