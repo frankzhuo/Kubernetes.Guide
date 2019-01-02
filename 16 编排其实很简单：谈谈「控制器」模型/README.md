@@ -84,7 +84,7 @@
 
 回顾一下 Kubernetes 组件架构：
 
-![Kubernetes 组件架构](./images/K8s 组件关系图.png)
+![Kubernetes 组件架构](./images/K8s组件关系图.png)
 
 由上图可知负责容器编排的组件为 Kube-controller-manager 的组件。
 
@@ -195,7 +195,7 @@ for {
 
 1. 类似 Deployment 这样的一个控制器，实际上是由上半部分的控制器定义（包括期望状态），加上下半部分的被控制对象的模板组成的。
 
-   ![nginx-deployment Yaml 文件](./images/nginx-deployment Yaml 文件.png)
+   ![nginx-deployment Yaml 文件](./images/nginx-deployment-yaml文件.png)
 
 2. Kubernetes 还有很多不同类型的容器编排功能，比如 StatefulSet、DaemonSet 等。它们无一例外地都有这样一个甚至多个控制器的存在，并遵循控制循环（Control Loop）的流程，完成各自的编排逻辑。 
 
