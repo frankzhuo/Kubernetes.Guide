@@ -843,6 +843,6 @@ Kubernetes 会为同一个 Deployment 保存多个不同的 ReplicaSet。最大�
    Deployment 控制 ReplicaSet（版本），ReplicaSet 控制 Pod（副本数）。<br/>
    首先，它通过 ReplicaSet 的个数来描述应用的版本；然后，它再通过 ReplicaSet 的属性来保证 Pod 的副本数量。
 
-2. Deployment 可以控制 ReplicaSet 对 Pod 进行「水平扩展/伸缩」。
+2. ReplicaSet 通过「控制器模式」保证系统中 Pod 的个数永远等于指定的个数。
 
-3. Deployment 可以控制 ReplicaSet 的版本对 Pod 进行「滚动更新」。
+3. Deployment 同样通过「控制器模式」，来操作 ReplicaSet 的个数和属性，进而实现「水平扩展/收缩」和「滚动更新」这两个编排动作。
