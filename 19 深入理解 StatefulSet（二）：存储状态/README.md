@@ -231,7 +231,7 @@ spec:
 
 在 POD 对象中使用 Kubernetes Secret 对象认证 Ceph 存储集群。
 
-这种方式和实践一直接使用 keyring 文件认证的区别就是使用 Kubernetes Secret 对象，该 Secret 对象用于 Kubernetes Volume 插件通过 Cephx 认证访问 Ceph 存储集群。
+这种方式和实践和直接使用 keyring 文件认证的区别就是使用 Kubernetes Secret 对象，该 Secret 对象用于 Kubernetes Volume 插件通过 Cephx 认证访问 Ceph 存储集群。
 
 ### 创建 Secret 对象
 
