@@ -13,3 +13,5 @@
 - [18 深入理解 StatefulSet（一）：拓扑状态](./18%20深入理解%20StatefulSet（一）：拓扑状态)
 
 - [19 深入理解 StatefulSet（二）：存储状态](./19%20深入理解%20StatefulSet（二）：存储状态)
+
+- [20 深入理解 StatefulSet（三）：有状态应用实践](./20%20深入理解%20StatefulSet（三）：有状态应用实践)
