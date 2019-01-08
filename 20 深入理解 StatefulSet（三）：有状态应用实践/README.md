@@ -81,7 +81,7 @@
 
 1. 编写 mysql-configmap.yaml 文件
 
-   [mysql-configmap.yaml](./mysql-configmap) 文件内容如下：
+   [mysql-configmap.yaml](./mysql-configmap.yaml) 文件内容如下：
 
    ```yaml
    apiVersion: v1
